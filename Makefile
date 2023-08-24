@@ -35,7 +35,7 @@ lint:
 	@if [ ! -f bin/golangci-lint ]; then \
     	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b bin; \
 	fi
-	@./bin/golangci-lint -v run pipelayer.go
+	@./bin/golangci-lint -v run filekv.go
 
 .PHONY: clean
 clean:

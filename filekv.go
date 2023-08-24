@@ -436,7 +436,7 @@ func (fileKV *FileKV[K, V]) rehash() {
 		go func(bucket *bucketKV[K, V], channel chan entryKV[K, V]) {
 			defer waitGroup.Done()
 			for entry := range channel {
-				bucket.store(func() ([]entryKV[K, V], error) {
+				_ = bucket.store(func() ([]entryKV[K, V], error) {
 					return []entryKV[K, V]{
 						entry,
 					}, nil
