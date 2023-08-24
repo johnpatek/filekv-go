@@ -31,7 +31,7 @@ func clientLoop(kv *filekv.FileKV[string, int]) {
 func BenchmarkFileKV(b *testing.B) {
 	kv, _ := filekv.New[string, int](os.Getenv("FILEKV_BENCHMARK_DIRECTORY"))
 	waitGroup := new(sync.WaitGroup)
-	for index := 0; index < 100; index++ {
+	for index := 0; index < 500; index++ {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
