@@ -126,7 +126,8 @@ func TestPrime(t *testing.T) {
 	assert.True(t, isPrime(2))
 	assert.False(t, isPrime(4))
 	assert.False(t, isPrime(28))
-	assert.Equal(t, nextPrime(7), 11)
+	assert.Equal(t, nextPrime(7, 1), 11)
+	assert.Equal(t, nextPrime(7, 2), 13)
 }
 
 func TestBucketIndex(t *testing.T) {

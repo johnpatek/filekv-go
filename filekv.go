@@ -426,7 +426,7 @@ func (fileKV *FileKV[K, V]) rehash() {
 		_ = oldBucket.expire()
 	}
 
-	_ = fileKV.createBuckets(nextPrime(len(oldBuckets)))
+	_ = fileKV.createBuckets(nextPrime(len(oldBuckets), 15))
 
 	waitGroup := new(sync.WaitGroup)
 	waitGroup.Add(len(fileKV.buckets))
@@ -493,10 +493,13 @@ func isPrime(value int) bool {
 	return value > 1
 }
 
-func nextPrime(value int) int {
-	next := value + 1
-	for !isPrime(next) {
-		next++
+func nextPrime(value int, offset int) int {
+	next := value
+	for count := 0; count < offset; count++ {
+		next = next + 1
+		for !isPrime(next) {
+			next++
+		}
 	}
 	return next
 }
