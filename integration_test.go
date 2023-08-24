@@ -20,7 +20,7 @@ func TestFileKV(t *testing.T) {
 	kv, err := filekv.New[string, *ValueType](directory)
 	assert.NotNil(t, kv)
 	assert.NoError(t, err)
-	for count := 0; count < 100; count++ {
+	for count := 0; count < 1000; count++ {
 		key := fmt.Sprintf("key%d", count)
 		value := &ValueType{
 			String: fmt.Sprintf("value%d", count),
@@ -29,7 +29,7 @@ func TestFileKV(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	for count := 0; count < 100; count++ {
+	for count := 0; count < 1000; count++ {
 		key := fmt.Sprintf("key%d", count)
 		expectedValue := &ValueType{
 			String: fmt.Sprintf("value%d", count),

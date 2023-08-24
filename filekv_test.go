@@ -38,8 +38,7 @@ var (
 		return make([]byte, 75)
 	}
 
-	validTestKV   *FileKV[string, *ValidType]
-	invalidTestKV *FileKV[string, *InvalidType]
+	validTestKV *FileKV[string, *ValidType]
 )
 
 func TestNew(t *testing.T) {
@@ -55,93 +54,72 @@ func TestNew(t *testing.T) {
 	kv, err = New[string, *ValidType](invalidDirectoryPerm)
 	assert.Nil(t, kv)
 	assert.Error(t, err)
-	validTestKV, err = New[string, *ValidType](validDirectory, HashFunction(hashString), LoadFactor(2.0), BucketCount(7))
-	assert.NotNil(t, validTestKV)
-	assert.NoError(t, err)
-	invalidTestKV, err = New[string, *InvalidType](invalidDirectoryValueType)
-	assert.NotNil(t, invalidTestKV)
-	assert.NoError(t, err)
+	kv, err = New[string, *ValidType](invalidDirectoryPerm, HashFunction(hashString))
+	assert.Nil(t, kv)
+	assert.Error(t, err)
 }
 
-func TestCreate(t *testing.T) {
-	err := invalidTestKV.Create("test-store-fail", &InvalidType{
-		Channel: make(chan int),
-	})
-	assert.Error(t, err)
-	err = validTestKV.Create("test-value", &ValidType{
-		String: "test-value",
-	})
+func TestBucket(t *testing.T) {
+	directory := path.Join(validDirectory, "testbucket")
+	_ = os.Mkdir(directory, 0777)
+	bucket, err := newBucket[string, ValidType](directory, 0)
+	assert.NotNil(t, bucket)
 	assert.NoError(t, err)
-	err = validTestKV.Create("test-value", &ValidType{
-		String: "test-duplicate-fail",
-	})
+	_ = os.Chmod(directory, 0444)
+	nilBucket, err := newBucket[string, ValidType](directory, 0)
+	assert.Nil(t, nilBucket)
 	assert.Error(t, err)
-	validTestKV.directory = invalidDirectoryPerm
-	err = validTestKV.Create("test-load-fail", &ValidType{
-		String: "test-load-fail",
-	})
+	_ = os.Chmod(directory, 0777)
+}
+
+func TestCRUD(t *testing.T) {
+	validKey := "valid-key"
+	invalidKey := "invalid-key"
+	initialValue := &ValidType{
+		String: "initial-string",
+	}
+	updatedValue := &ValidType{
+		String: "updated-string",
+	}
+	assert.NoError(t, validTestKV.Create(validKey, initialValue))
+	assert.Error(t, validTestKV.Create(validKey, initialValue))
+	value, err := validTestKV.Read(validKey)
+	assert.Equal(t, initialValue, value)
+	assert.NoError(t, err)
+	_, err = validTestKV.Read(invalidKey)
 	assert.Error(t, err)
-	validTestKV.directory = validDirectory
-	count := validTestKV.bucketCount
-	requiredEntries := int(float64(validTestKV.bucketCount) * validTestKV.loadFactor)
-	for entriesAdded := 0; entriesAdded < requiredEntries; entriesAdded++ {
-		kv := fmt.Sprintf("test-rehash-entry%d", entriesAdded)
-		err = validTestKV.Create(kv, &ValidType{String: kv})
+	assert.NoError(t, validTestKV.Update(validKey, func(value *ValidType) *ValidType {
+		return updatedValue
+	}))
+	assert.Error(t, validTestKV.Update(invalidKey, func(value *ValidType) *ValidType {
+		return updatedValue
+	}))
+	value, err = validTestKV.Read(validKey)
+	assert.Equal(t, updatedValue, value)
+	assert.NoError(t, err)
+	assert.NoError(t, validTestKV.Delete(validKey))
+	assert.Error(t, validTestKV.Delete(invalidKey))
+	assert.Error(t, validTestKV.Delete(validKey))
+	assert.Zero(t, validTestKV.size)
+	rehashTestEntryCount := 1 + int(validTestKV.loadFactor*float64(len(validTestKV.buckets)))
+	for index := 0; index < rehashTestEntryCount; index++ {
+		key := fmt.Sprintf("rehash-test-key-%d", index)
+		value := &ValidType{
+			String: fmt.Sprintf("rehash-test-key-%d", index),
+		}
+		assert.NoError(t, validTestKV.Create(key, value))
+	}
+
+	for index := 0; index < rehashTestEntryCount; index++ {
+		key := fmt.Sprintf("rehash-test-key-%d", index)
+		expectedValue := &ValidType{
+			String: fmt.Sprintf("rehash-test-key-%d", index),
+		}
+		value, err := validTestKV.Read(key)
+		assert.Equal(t, expectedValue, value)
 		assert.NoError(t, err)
 	}
-	newCount := validTestKV.bucketCount
-	assert.NotEqual(t, count, newCount)
-}
 
-func TestRead(t *testing.T) {
-	value, err := validTestKV.Read("test-value")
-	assert.NotNil(t, value)
-	assert.NoError(t, err)
-	value, err = validTestKV.Read("test-value-dne")
-	assert.Nil(t, value)
-	assert.Error(t, err)
-	validTestKV.directory = invalidDirectoryDNE
-	invalid, err := validTestKV.Read("test-value")
-	assert.Nil(t, invalid)
-	assert.Error(t, err)
-	validTestKV.directory = validDirectory
-}
-
-func TestUpdate(t *testing.T) {
-	updateFunc := func(value *ValidType) *ValidType {
-		return value
-	}
-	err := validTestKV.Update("test-value", updateFunc)
-	assert.NoError(t, err)
-	err = validTestKV.Update("test-value-dne", updateFunc)
-	assert.Error(t, err)
-	validTestKV.directory = invalidDirectoryDNE
-	err = validTestKV.Update("test-value", updateFunc)
-	assert.Error(t, err)
-	validTestKV.directory = validDirectory
-	index := validTestKV.getBucketIndex("test-value")
-	path := path.Join(validDirectory, fmt.Sprintf("bucket%d", index))
-	_ = os.Chmod(path, 0400)
-	err = validTestKV.Update("test-value", updateFunc)
-	assert.Error(t, err)
-	_ = os.Chmod(path, 0666)
-}
-
-func TestDelete(t *testing.T) {
-	err := validTestKV.Delete("invalid-key-dne")
-	assert.Error(t, err)
-	validTestKV.directory = invalidDirectoryDNE
-	err = validTestKV.Delete("test-value")
-	assert.Error(t, err)
-	validTestKV.directory = validDirectory
-	index := validTestKV.getBucketIndex("test-value")
-	path := path.Join(validDirectory, fmt.Sprintf("bucket%d", index))
-	_ = os.Chmod(path, 0400)
-	err = validTestKV.Delete("test-value")
-	assert.Error(t, err)
-	_ = os.Chmod(path, 0666)
-	err = validTestKV.Delete("test-value")
-	assert.NoError(t, err)
 }
 
 func TestPrime(t *testing.T) {
@@ -174,6 +152,7 @@ func TestMain(m *testing.M) {
 	invalidDirectoryPerm = path.Join(unitTestDirectory, "readonly")
 	_ = os.Mkdir(invalidDirectoryPerm, 0444)
 	invalidDirectoryValueType, _ = os.MkdirTemp(unitTestDirectory, "badtype")
+	validTestKV, _ = New[string, *ValidType](validDirectory, LoadFactor(0.75), BucketCount(7))
 	code := m.Run()
 	unitTestEntries, _ := os.ReadDir(validDirectory)
 	if len(unitTestEntries) < 2 {

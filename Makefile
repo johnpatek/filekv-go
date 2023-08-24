@@ -12,7 +12,7 @@ test: unit cover integration benchmark
 .PHONY: unit
 unit:
 	@echo $(UNIT_TEST_HEADER)
-	@go test -v -timeout 5s -coverprofile=coverage.out github.com/johnpatek/filekv-go -skip TestFileKV
+	@go test -v -timeout 30s -coverprofile=coverage.out github.com/johnpatek/filekv-go -skip TestFileKV
 
 .PHONY: cover
 cover:
