@@ -376,6 +376,25 @@ func (fileKV *FileKV[K, V]) Delete(key K) error {
 	return nil
 }
 
+func (fileKV *FileKV[K, V]) ForEach(callbackFunc func(K, V)) {
+	fileKV.mutex.Lock()
+	defer fileKV.mutex.Lock()
+	waitGroup := new(sync.WaitGroup)
+	for index := range fileKV.buckets {
+		waitGroup.Add(1)
+		func(bucket *bucketKV[K, V]) {
+			defer waitGroup.Done()
+			_ = bucket.load(func(entries []entryKV[K, V]) error {
+				for _, entry := range entries {
+					callbackFunc(entry.Key, entry.Value)
+				}
+				return nil
+			})
+		}(fileKV.buckets[index])
+	}
+	waitGroup.Wait()
+}
+
 func verifyDirectory(path string) error {
 	directoryInfo, err := os.Stat(path)
 	if err != nil {
