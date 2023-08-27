@@ -27,13 +27,16 @@ import (
 	"math"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 )
 
 const (
-	defaultBucketCount int     = 113
-	defaultLoadFactor  float64 = 0.75
+	defaultBucketCount     int     = 113
+	defaultLoadFactor      float64 = 0.75
+	defaultRehashIncrement int     = 15
+	recoveryFile           string  = ".filekv"
 )
 
 func defaultHashFunction[K comparable](key K) []byte {
@@ -59,9 +62,23 @@ func newBucket[K comparable, V any](directory string, index int) (*bucketKV[K, V
 	path := path.Join(directory, fmt.Sprintf("bucket%d", index))
 	file, err := os.Create(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create bucket file: %v", err)
+		return nil, fmt.Errorf("newBucket: failed to create bucket file: %v", err)
 	}
 	file.Close()
+	return &bucketKV[K, V]{
+		path:  path,
+		mutex: new(sync.RWMutex),
+	}, nil
+}
+
+func recoverBucket[K comparable, V any](path string) (*bucketKV[K, V], error) {
+	statInfo, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("recoverBucket: failed to stat bucket: %v", err)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("recoverBucket: not a file: %s", path)
+	}
 	return &bucketKV[K, V]{
 		path:  path,
 		mutex: new(sync.RWMutex),
@@ -220,6 +237,38 @@ type FileKV[K comparable, V any] struct {
 	hashFunction func(K) []byte
 }
 
+type recoveryKV struct {
+	LoadFactor float64
+}
+
+func (fileKV *FileKV[K, V]) storeRecovery() error {
+	path := path.Join(fileKV.directory, recoveryFile)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0666)
+	if err != nil {
+		return fmt.Errorf("storeRecovery: failed to open recovery file")
+	}
+	defer file.Close()
+	encoder := json.NewEncoder(file)
+	_ = encoder.Encode(recoveryKV{
+		LoadFactor: fileKV.loadFactor,
+	})
+	return nil
+}
+
+func (fileKV *FileKV[K, V]) loadRecovery() error {
+	path := path.Join(fileKV.directory, recoveryFile)
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("loadRecovery: failed to open recovery file")
+	}
+	defer file.Close()
+	recovery := new(recoveryKV)
+	decoder := json.NewDecoder(file)
+	_ = decoder.Decode(recovery)
+	fileKV.loadFactor = recovery.LoadFactor
+	return nil
+}
+
 func New[K comparable, V any](directory string, options ...Option) (*FileKV[K, V], error) {
 	parsedOptions, err := parseOptions[K](options)
 	if err != nil {
@@ -244,6 +293,47 @@ func New[K comparable, V any](directory string, options ...Option) (*FileKV[K, V
 		return nil, fmt.Errorf("New: failed to create buckets: %v", err)
 	}
 
+	fileKV.storeRecovery()
+
+	return fileKV, nil
+}
+
+func Recover[K comparable, V any](directory string, hashFunction func(K) []byte) (*FileKV[K, V], error) {
+	fileKV := &FileKV[K, V]{
+		directory:    directory,
+		hashFunction: hashFunction,
+	}
+
+	err := fileKV.loadRecovery()
+	if err != nil {
+		return nil, fmt.Errorf("Recover: failed to load recovery file: %v", err)
+	}
+
+	files, err := os.ReadDir(directory)
+	if err != nil {
+		return nil, fmt.Errorf("Recover: failed to read directory: %v", err)
+	}
+	regex, _ := regexp.Compile("bucket*")
+	buckets := []*bucketKV[K, V]{}
+	for _, file := range files {
+		if regex.Match([]byte(file.Name())) {
+			bucket, err := recoverBucket[K, V](path.Join(directory, file.Name()))
+			if err != nil {
+				return nil, fmt.Errorf("Recover: failed to recover bucket: %v", err)
+			}
+			buckets = append(buckets, bucket)
+		}
+	}
+	size := 0
+	for _, bucket := range buckets {
+		err = bucket.load(func(entries []entryKV[K, V]) error {
+			size += len(entries)
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("Recover: failed to load bucket: %v", err)
+		}
+	}
 	return fileKV, nil
 }
 
